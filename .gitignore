@@ -6,4 +6,5 @@ dist/
 .DS_Store
 *.log
 config.js
+!api/config.js
 VERCEL_SETUP.md
