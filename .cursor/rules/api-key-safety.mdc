@@ -1,0 +1,40 @@
+---
+description: Enforce API key safety — never expose secrets in client-side code or committed files
+globs:
+  - "**/*.js"
+  - "**/*.ts"
+  - "**/*.json"
+  - "**/*.html"
+  - "**/*.env*"
+alwaysApply: true
+---
+
+# API Key Safety Rules
+
+## Never hardcode secrets in client-side code
+- Do NOT write any API key, token, or secret as a string literal in any file that is loaded by the browser.
+- Client-side files include: `index.html`, any file under `src/`, anything loaded via `<script>` tags.
+
+## Gemini API key — server-side only
+- The Gemini API key lives in Vercel's Environment Variables as `GEMINI_API_KEY`.
+- All Gemini calls go through the serverless proxy at `api/gemini.js`.
+- Never pass or read `window.GEMINI_API_KEY` in any client-side file.
+
+## Google Maps API key
+- Loaded via `config.js` (gitignored) and `window.GOOGLE_MAPS_API_KEY`.
+- `config.js` must NEVER be committed. It is already in `.gitignore`.
+- Remind the user to restrict this key by HTTP referrer in Google Cloud Console.
+
+## config.js vs config.example.js
+- `config.example.js` — safe to commit, contains only placeholder values.
+- `config.js` — gitignored, contains the real Google Maps key for local dev only.
+- Never add real keys to `config.example.js`.
+
+## Environment variables for local dev
+- Gemini key for local development goes in `.env.local` (already gitignored via `.env` rule).
+- Format: `GEMINI_API_KEY=your_key_here`
+- Run `vercel dev` locally so the serverless function can read it.
+
+## Git hygiene
+- If you are ever about to write a real API key into any file, stop and flag it to the user.
+- If a secret is accidentally committed, it must be revoked immediately — git history rewrites are not sufficient.

@@ -1,5 +1,4 @@
-const GEMINI_MODEL = 'gemini-2.5-flash';
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+const GEMINI_PROXY = '/api/gemini';
 
 /**
  * Use Gemini to curate exactly 3 date spots from a venue list.
@@ -10,8 +9,8 @@ const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GE
  * @param {Object} [datetime]  { day, time }
  * @returns {Promise<Array>}
  */
-export async function curateVenues(venues, filters, apiKey, datetime = {}) {
-  const response = await fetch(`${GEMINI_URL}?key=${encodeURIComponent(apiKey)}`, {
+export async function curateVenues(venues, filters, datetime = {}) {
+  const response = await fetch(GEMINI_PROXY, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -62,7 +61,7 @@ export async function curateVenues(venues, filters, apiKey, datetime = {}) {
  * @param {Object} [datetime]  { day, time }
  * @returns {Promise<Object|null>} One enriched venue object, or null on failure
  */
-export async function replaceVenue(remaining, filters, apiKey, datetime = {}) {
+export async function replaceVenue(remaining, filters, datetime = {}) {
   if (!remaining.length) return null;
 
   const simplified = remaining.map(v => ({
@@ -94,7 +93,7 @@ Allowed vibes: romantic, intimate, lively, trendy, cozy, casual, fancy, quirky, 
 Venues:
 ${JSON.stringify(simplified)}`;
 
-  const response = await fetch(`${GEMINI_URL}?key=${encodeURIComponent(apiKey)}`, {
+  const response = await fetch(GEMINI_PROXY, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -133,7 +132,7 @@ ${JSON.stringify(simplified)}`;
  * @param {Object} [datetime]  { day, time }
  * @returns {Promise<Object|null>}
  */
-export async function replaceVenueLenient(remaining, filters, apiKey, datetime = {}) {
+export async function replaceVenueLenient(remaining, filters, datetime = {}) {
   if (!remaining.length) return null;
 
   const simplified = remaining.map(v => ({
@@ -171,7 +170,7 @@ Allowed vibes: romantic, intimate, lively, trendy, cozy, casual, fancy, quirky, 
 Venues:
 ${JSON.stringify(simplified)}`;
 
-  const response = await fetch(`${GEMINI_URL}?key=${encodeURIComponent(apiKey)}`, {
+  const response = await fetch(GEMINI_PROXY, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

@@ -143,8 +143,6 @@ function init() {
     whenDisplay.textContent = parts.length ? parts.join(' · ') : 'Tap to set';
   }
 
-  const geminiKey = typeof window !== 'undefined' ? window.GEMINI_API_KEY : '';
-
   // Gray out incompatible budget pills based on selected vibe
   function updateBudgetExclusions() {
     const vibe = state.filters.vibe;
@@ -194,16 +192,16 @@ function init() {
     let newPick = null;
     try {
       // First try a strict match; if it returns nothing, fall back to lenient
-      newPick = await replaceVenue(remaining, state.filters, geminiKey, state.datetime);
+      newPick = await replaceVenue(remaining, state.filters, state.datetime);
       if (!newPick) {
-        newPick = await replaceVenueLenient(remaining, state.filters, geminiKey, state.datetime);
+        newPick = await replaceVenueLenient(remaining, state.filters, state.datetime);
       }
       if (newPick) state.curatedVenues.push(newPick);
     } catch (err) {
       console.warn('Replace venue failed:', err.message);
       // Last resort: lenient
       try {
-        const fallback = await replaceVenueLenient(remaining, state.filters, geminiKey, state.datetime);
+        const fallback = await replaceVenueLenient(remaining, state.filters, state.datetime);
         if (fallback) { newPick = fallback; state.curatedVenues.push(fallback); }
       } catch (e) {
         console.warn('Lenient replace also failed:', e.message);
@@ -216,10 +214,10 @@ function init() {
 
   // Re-run AI curation with current venues + updated filters (no re-fetch)
   async function reCurate() {
-    if (!state.venues.length || !geminiKey) return;
+    if (!state.venues.length) return;
     showCuratingScreen();
     try {
-      const curated = await curateVenues(state.venues, state.filters, geminiKey, state.datetime);
+      const curated = await curateVenues(state.venues, state.filters, state.datetime);
       state.curatedVenues = curated;
       hideCuratingScreen();
       renderCuratedResults(curated, state.venues, dismissAndReplace);
@@ -260,7 +258,7 @@ function init() {
       }
 
       // Only mark pending if there are results to re-curate
-      if (state.venues.length && geminiKey) {
+      if (state.venues.length) {
         filtersUpdateBtn.classList.add('filters-update-btn--pending');
         filtersUpdateBtn.textContent = 'Re-curate with new mood ✦';
       }
@@ -334,10 +332,10 @@ function init() {
       // Hide first-run hint after first successful search
       document.getElementById('onboarding-hint')?.classList.add('hidden');
 
-      if (geminiKey && venues.length) {
+      if (venues.length) {
         showCuratingScreen();
         try {
-          const curated = await curateVenues(venues, state.filters, geminiKey, state.datetime);
+          const curated = await curateVenues(venues, state.filters, state.datetime);
           state.curatedVenues = curated;
           hideCuratingScreen();
           renderCuratedResults(curated, venues, dismissAndReplace);
