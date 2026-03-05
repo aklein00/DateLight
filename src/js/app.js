@@ -1,9 +1,9 @@
 import { state } from './state.js';
 import { loadGoogleMaps, initPlacesAutocomplete } from './places.js';
 import { initMap, updateRadius, dropPins } from './map.js';
-import { searchVenues, sampleDensity, recommendRadius } from './search.js';
-import { renderResults, renderCuratedResults, showLoading, showCuratingScreen, hideCuratingScreen } from './ui.js';
-import { curateVenues, replaceVenue, replaceVenueLenient } from './ai.js';
+import { searchVenues, searchAddons, sampleDensity, recommendRadius } from './search.js';
+import { renderResults, renderCuratedResults, showLoading, showCuratingScreen, hideCuratingScreen, renderExtendCTA, renderAddonCard } from './ui.js';
+import { curateVenues, replaceVenue, replaceVenueLenient, suggestAddon } from './ai.js';
 
 const DAY_LABELS = { tonight: 'Tonight', friday: 'Fri', saturday: 'Sat', sunday: 'Sun', monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu' };
 const TIME_LABELS = { afternoon: 'Afternoon', evening: 'Evening', 'late-night': 'Late night' };
@@ -219,14 +219,43 @@ function init() {
     try {
       const curated = await curateVenues(state.venues, state.filters, state.datetime);
       state.curatedVenues = curated;
+      state.addonVenue = null;
       hideCuratingScreen();
       renderCuratedResults(curated, state.venues, dismissAndReplace);
       dropPins(curated.length ? curated : state.venues);
+      if (curated.length) renderExtendCTA(onExtend);
     } catch (aiErr) {
       hideCuratingScreen();
       console.warn('Re-curation failed:', aiErr.message);
       document.getElementById('results-heading').textContent = 'Nearby spots';
     }
+  }
+
+  // "Extend the Date" — fetch a new nearby search around the last pick and ask AI for one add-on
+  async function onExtend() {
+    const picks = state.curatedVenues;
+    if (!picks.length) return;
+
+    // Use the last pick's coordinates as the epicenter; fall back to search origin
+    const anchor = picks[picks.length - 1];
+    const lat = anchor.lat ?? state.location.lat;
+    const lng = anchor.lng ?? state.location.lng;
+
+    const addonPool = await searchAddons(lat, lng, 0.5, apiKey);
+
+    // Filter out venues already curated
+    const usedIds = new Set(picks.map(v => v.id));
+    const candidates = addonPool.filter(v => !usedIds.has(v.id));
+
+    if (!candidates.length) {
+      throw new Error('No add-on candidates found nearby');
+    }
+
+    const addon = await suggestAddon(picks, candidates, state.filters, state.datetime);
+    if (!addon) throw new Error('AI returned no add-on suggestion');
+
+    state.addonVenue = addon;
+    renderAddonCard(addon);
   }
 
   const DATETIME_GROUPS = new Set(['day', 'time']);
@@ -337,9 +366,11 @@ function init() {
         try {
           const curated = await curateVenues(venues, state.filters, state.datetime);
           state.curatedVenues = curated;
+          state.addonVenue = null;
           hideCuratingScreen();
           renderCuratedResults(curated, venues, dismissAndReplace);
           dropPins(curated.length ? curated : venues);
+          if (curated.length) renderExtendCTA(onExtend);
         } catch (aiErr) {
           hideCuratingScreen();
           console.warn('AI curation failed, showing raw results:', aiErr.message);
@@ -381,3 +412,9 @@ function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js');
+  });
+}

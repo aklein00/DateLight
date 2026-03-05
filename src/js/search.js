@@ -105,6 +105,76 @@ export async function searchVenues(lat, lng, radiusMiles, apiKey) {
 }
 
 /**
+ * Search for add-on venues (dessert, activities, parks, etc.) near a location.
+ * Used by the "Extend the Date" feature to find a follow-up stop.
+ * @param {number} lat
+ * @param {number} lng
+ * @param {number} radiusMiles
+ * @param {string} apiKey
+ * @returns {Promise<Array>} Normalized venue objects sorted by rating.
+ */
+export async function searchAddons(lat, lng, radiusMiles, apiKey) {
+  const radiusMeters = Math.min(radiusMiles * MILES_TO_METERS, 50000);
+
+  const response = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': apiKey,
+      'X-Goog-FieldMask': [
+        'places.id',
+        'places.displayName',
+        'places.location',
+        'places.rating',
+        'places.userRatingCount',
+        'places.priceLevel',
+        'places.types',
+        'places.formattedAddress',
+        'places.googleMapsUri',
+        'places.businessStatus',
+      ].join(','),
+    },
+    body: JSON.stringify({
+      includedTypes: [
+        'bar', 'night_club', 'cafe',
+        'dessert_restaurant', 'ice_cream_shop', 'bakery',
+        'park', 'art_gallery', 'museum',
+        'movie_theater', 'bowling_alley', 'amusement_park',
+      ],
+      locationRestriction: {
+        circle: {
+          center: { latitude: lat, longitude: lng },
+          radius: radiusMeters,
+        },
+      },
+      maxResultCount: 15,
+      rankPreference: 'POPULARITY',
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `Places API error ${response.status}`);
+  }
+
+  const data = await response.json();
+  const places = (data.places || []).filter(p => p.businessStatus !== 'CLOSED_PERMANENTLY');
+
+  return places.map(p => ({
+    id: p.id,
+    name: p.displayName?.text || 'Unknown',
+    lat: p.location?.latitude ?? null,
+    lng: p.location?.longitude ?? null,
+    rating: p.rating ?? null,
+    ratingCount: p.userRatingCount ?? null,
+    price: PRICE_LEVELS[p.priceLevel] ?? null,
+    type: getPrimaryType(p.types),
+    address: p.formattedAddress ?? null,
+    mapsUrl: p.googleMapsUri ?? null,
+  })).sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
+}
+
+/**
  * Sample venue density at 1 km to recommend a scatter radius.
  * Only requests IDs to minimize billing cost.
  * @returns {Promise<number>} Count of venues found (capped at 20 by the API).

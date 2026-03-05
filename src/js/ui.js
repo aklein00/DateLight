@@ -386,6 +386,131 @@ export function renderCuratedResults(curatedVenues, allVenues, onDismiss, poolEm
   resultsArea.classList.add('is-visible');
 }
 
+/**
+ * Append the "Extend the evening →" CTA below the curated results list.
+ * Replaces itself with a loading state while the AI call runs.
+ * @param {Function} onExtend  Called when the user taps the CTA
+ */
+export function renderExtendCTA(onExtend) {
+  const list = document.getElementById('results-list');
+  if (!list) return;
+
+  // Remove any stale CTA or addon card from a previous search
+  list.querySelector('.extend-cta')?.remove();
+  list.querySelector('.addon-card-wrap')?.remove();
+
+  const btn = document.createElement('button');
+  btn.className = 'extend-cta';
+  btn.innerHTML = `<span class="extend-cta-label">Extend the evening</span><span class="extend-cta-arrow">→</span>`;
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    btn.innerHTML = `<span class="extend-cta-label">Finding the perfect next stop…</span>`;
+    btn.classList.add('extend-cta--loading');
+    try {
+      await onExtend();
+    } catch {
+      btn.innerHTML = `<span class="extend-cta-label">Extend the evening</span><span class="extend-cta-arrow">→</span>`;
+      btn.disabled = false;
+      btn.classList.remove('extend-cta--loading');
+    }
+  });
+
+  list.appendChild(btn);
+}
+
+/**
+ * Replace the extend CTA with the AI-suggested add-on card.
+ * @param {Object} addon  Enriched venue with tagline, reason, vibes, thenLabel
+ */
+export function renderAddonCard(addon) {
+  const list = document.getElementById('results-list');
+  if (!list) return;
+
+  list.querySelector('.extend-cta')?.remove();
+
+  const wrap = document.createElement('div');
+  wrap.className = 'addon-card-wrap';
+
+  const thenLabel = document.createElement('div');
+  thenLabel.className = 'addon-then-label';
+  thenLabel.textContent = addon.thenLabel || 'Then →';
+  wrap.appendChild(thenLabel);
+
+  const card = document.createElement('div');
+  card.className = 'venue-card venue-card--curated addon-card';
+
+  if (addon.tagline) {
+    const taglineEl = document.createElement('p');
+    taglineEl.className = 'venue-tagline';
+    taglineEl.textContent = `"${addon.tagline}"`;
+    card.appendChild(taglineEl);
+  }
+
+  const nameRow = document.createElement('div');
+  nameRow.className = 'flex items-center justify-between gap-2';
+  const nameEl = document.createElement('div');
+  nameEl.className = 'venue-handle';
+  nameEl.textContent = `@${addon.name}`;
+  const badge = document.createElement('span');
+  badge.className = 'ai-badge ai-badge--addon';
+  badge.textContent = '✦ add-on';
+  nameRow.appendChild(nameEl);
+  nameRow.appendChild(badge);
+  card.appendChild(nameRow);
+
+  if (addon.reason) {
+    const reasonEl = document.createElement('p');
+    reasonEl.className = 'venue-reason';
+    reasonEl.textContent = addon.reason;
+    card.appendChild(reasonEl);
+  }
+
+  const metaRow = document.createElement('div');
+  metaRow.className = 'venue-meta flex-wrap gap-y-1 mt-1';
+
+  if (addon.rating != null) {
+    const ratingEl = document.createElement('span');
+    ratingEl.className = 'venue-stars';
+    ratingEl.textContent = starRating(addon.rating);
+    const ratingNum = document.createElement('span');
+    ratingNum.textContent = addon.rating.toFixed(1);
+    metaRow.appendChild(ratingEl);
+    metaRow.appendChild(ratingNum);
+  }
+
+  if (addon.price) {
+    const priceEl = document.createElement('span');
+    priceEl.className = 'venue-price';
+    priceEl.textContent = addon.price;
+    metaRow.appendChild(priceEl);
+  }
+
+  (addon.vibes || []).forEach(vibe => {
+    const pill = document.createElement('span');
+    pill.className = 'vibe-pill';
+    pill.textContent = vibe;
+    metaRow.appendChild(pill);
+  });
+
+  card.appendChild(metaRow);
+
+  if (addon.mapsUrl) {
+    const footer = document.createElement('div');
+    footer.className = 'venue-footer';
+    const linkEl = document.createElement('a');
+    linkEl.href = addon.mapsUrl;
+    linkEl.target = '_blank';
+    linkEl.rel = 'noopener noreferrer';
+    linkEl.className = 'venue-maps-link';
+    linkEl.textContent = '↗ Open in Maps';
+    footer.appendChild(linkEl);
+    card.appendChild(footer);
+  }
+
+  wrap.appendChild(card);
+  list.appendChild(wrap);
+}
+
 export function showLoading() {
   const list = document.getElementById('results-list');
   const resultsArea = document.getElementById('results-area');

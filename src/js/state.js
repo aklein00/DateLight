@@ -13,4 +13,5 @@ export const state = {
   },
   venues: [],
   curatedVenues: [],
+  addonVenue: null,
 };

@@ -205,6 +205,86 @@ ${JSON.stringify(simplified)}`;
   };
 }
 
+/**
+ * Ask Gemini to suggest one add-on stop that extends the date after the 3 curated picks.
+ * @param {Array}  curatedVenues  The 3 curated venues already shown to the user
+ * @param {Array}  addonPool      Nearby venues fetched by searchAddons()
+ * @param {Object} filters        { vibe, budget, type }
+ * @param {Object} [datetime]     { day, time }
+ * @returns {Promise<Object|null>} One enriched venue object, or null on failure
+ */
+export async function suggestAddon(curatedVenues, addonPool, filters, datetime = {}) {
+  if (!addonPool.length) return null;
+
+  const simplified = addonPool.map(v => ({
+    id: v.id, name: v.name, type: v.type,
+    rating: v.rating, ratingCount: v.ratingCount,
+    price: v.price || '?', address: v.address,
+  }));
+
+  const context = curatedVenues.map((v, i) => `${i + 1}. ${v.name} (${v.type}${v.price ? `, ${v.price}` : ''})`).join('\n');
+  const datetimeCtx = buildDatetimeContext(datetime);
+  const vibeCtx = filters.vibe ? `Vibe: ${filters.vibe}.` : '';
+  const budgetCtx = filters.budget ? `Budget: ${filters.budget}.` : '';
+
+  const prompt = `You are DateLight. The user has 3 curated date spots:
+${context}
+
+They want one more stop to extend the evening. ${vibeCtx} ${budgetCtx}
+${datetimeCtx}
+
+From the list below, pick EXACTLY 1 add-on stop that naturally extends this date — a dessert spot, activity, cocktail bar, park walk, gallery, etc. Choose something that contrasts or complements the main picks.
+
+Rules:
+- NEVER pick a chain (Starbucks, Applebee's, etc.)
+- Pick something with a different energy or category than the 3 main picks
+- Write a 4–7 word tagline (specific to this place)
+- One punchy sentence for the reason — explain why this is the perfect next stop
+- Set "thenLabel" to "Then →"
+
+Return EXACTLY 1 item as a JSON array:
+[{"id":"exact_id","name":"exact name","tagline":"Short tagline","reason":"Why this is the perfect next stop.","vibes":["tag1","tag2"],"thenLabel":"Then →"}]
+
+Allowed vibes: romantic, intimate, lively, trendy, cozy, casual, fancy, quirky, outdoor, speakeasy, neighborhood gem, hidden gem, gritty, dive bar, dessert, activity
+
+Venues:
+${JSON.stringify(simplified)}`;
+
+  const response = await fetch(GEMINI_PROXY, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.95, responseMimeType: 'application/json' },
+    }),
+  });
+
+  if (!response.ok) throw new Error(`Gemini addon error ${response.status}`);
+
+  const data = await response.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) return null;
+
+  const picks = JSON.parse(text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim());
+  const pick = Array.isArray(picks) ? picks[0] : picks;
+  if (!pick) return null;
+
+  const byId = Object.fromEntries(addonPool.map(v => [v.id, v]));
+  const venue = byId[pick.id] ?? addonPool.find(v =>
+    v.name.toLowerCase().includes((pick.name ?? '').toLowerCase()) ||
+    (pick.name ?? '').toLowerCase().includes(v.name.toLowerCase())
+  );
+  if (!venue) return null;
+
+  return {
+    ...venue,
+    tagline: pick.tagline || '',
+    reason: pick.reason || '',
+    vibes: pick.vibes || [],
+    thenLabel: pick.thenLabel || 'Then →',
+  };
+}
+
 function buildDatetimeContext(datetime = {}) {
   const { day, time } = datetime;
   if (!day && !time) return '';
