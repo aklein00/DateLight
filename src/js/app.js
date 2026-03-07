@@ -28,6 +28,8 @@ function resetUseLocationButton(btn) {
 const API_ERROR_MESSAGES = {
   'script-load-failed':       'Could not load Google Maps. Check your API key and that Maps JavaScript API is enabled in Google Cloud Console.',
   'places-api-new-disabled':  'Address autocomplete is disabled. Enable "Places API (New)" at console.cloud.google.com → APIs & Services → Library.',
+  'geo-unsupported':          'Location access isn\'t available in this browser — try typing your address.',
+  'geo-failed':               'Couldn\'t get your location — try entering your address above.',
 };
 
 function showApiError(card, errorCode) {
@@ -97,12 +99,16 @@ function init() {
     }
   });
 
+  // Dismiss geo error when user starts typing an address
+  locationInput.addEventListener('input', () => hideApiError(locationCard));
+
   // Use current location
   useLocationBtn.addEventListener('click', () => {
     if (!navigator.geolocation) {
-      alert('Geolocation is not supported by your browser.');
+      showApiError(locationCard, 'geo-unsupported');
       return;
     }
+    hideApiError(locationCard);
     useLocationBtn.textContent = 'Locating…';
     useLocationBtn.disabled = true;
 
@@ -112,11 +118,12 @@ function init() {
         locationInput.value = 'Current location';
         useLocationBtn.innerHTML = LOCATION_SET_HTML;
         useLocationBtn.disabled = false;
+        hideApiError(locationCard);
         applySmartRadius(pos.coords.latitude, pos.coords.longitude);
       },
       () => {
-        alert('Could not get your location. Try entering an address.');
         resetUseLocationButton(useLocationBtn);
+        showApiError(locationCard, 'geo-failed');
       }
     );
   });
@@ -388,10 +395,17 @@ function init() {
       }
     } catch (err) {
       document.getElementById('results-list').innerHTML = `
-        <div class="text-center py-8">
-          <p class="text-sm text-[#D8A7A1]">Search failed: ${err.message}</p>
+        <div class="empty-state">
+          <div class="empty-state-icon">
+            <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="32" cy="32" r="22" stroke="rgba(198,168,107,0.4)" stroke-width="2" fill="rgba(198,168,107,0.06)"/>
+              <path d="M32 20v14M32 38v3" stroke="rgba(198,168,107,0.7)" stroke-width="2.5" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <p class="empty-state-title">Something went wrong</p>
+          <p class="empty-state-copy">We couldn't complete that search. Check your connection and try again.</p>
         </div>`;
-      document.getElementById('results-area').classList.remove('hidden');
+      document.getElementById('results-area').classList.add('is-visible');
     } finally {
       searchBtn.disabled = false;
       searchBtn.textContent = 'Find date spots';

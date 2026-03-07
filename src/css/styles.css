@@ -20,7 +20,7 @@ h1, h2, h3 {
 .card {
   background: white;
   border-radius: 20px;
-  padding: 20px 24px;
+  padding: 16px 24px;
   box-shadow: 0 2px 16px rgba(28, 28, 30, 0.06);
 }
 
@@ -1137,7 +1137,7 @@ main > .card:not(#filters-section):not(#search-panel),
   }
 
   .card {
-    padding: 18px 20px;
+    padding: 14px 20px;
   }
 
   /* Larger slider thumb for touch */
