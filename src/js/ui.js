@@ -292,8 +292,12 @@ export function renderCuratedResults(curatedVenues, allVenues, onDismiss, poolEm
     nameEl.textContent = `@${v.name}`;
 
     const aiBadge = document.createElement('span');
-    aiBadge.className = v.stretch ? 'ai-badge ai-badge--stretch' : 'ai-badge';
-    aiBadge.textContent = v.stretch ? '~ nearby option' : '✦ pick';
+    aiBadge.className = v.outOfRange
+      ? 'ai-badge ai-badge--outofrange'
+      : v.stretch ? 'ai-badge ai-badge--stretch' : 'ai-badge';
+    aiBadge.textContent = v.outOfRange
+      ? '↗ just outside your range'
+      : v.stretch ? '~ nearby option' : '✦ pick';
 
     nameRow.appendChild(nameEl);
     nameRow.appendChild(aiBadge);

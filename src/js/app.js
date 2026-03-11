@@ -186,8 +186,9 @@ function init() {
   // Dismiss one curated pick and fetch a single AI replacement from leftover venues
   async function dismissAndReplace(dismissedVenue) {
     state.curatedVenues = state.curatedVenues.filter(v => v.id !== dismissedVenue.id);
+    state.dismissedIds.add(dismissedVenue.id);
     const usedIds = new Set(state.curatedVenues.map(v => v.id));
-    const remaining = state.venues.filter(v => !usedIds.has(v.id));
+    const remaining = state.venues.filter(v => !usedIds.has(v.id) && !state.dismissedIds.has(v.id));
 
     if (!remaining.length) {
       // Pool is truly empty — render a notice card
@@ -196,20 +197,32 @@ function init() {
       return;
     }
 
+    // Prefer in-range replacements; fall back to full remaining pool if exhausted
+    const inRangeRemaining = remaining.filter(v => !state.outOfRangeIds.has(v.id));
+    const pool = inRangeRemaining.length ? inRangeRemaining : remaining;
+    const usingOutOfRange = !inRangeRemaining.length;
+
     let newPick = null;
     try {
       // First try a strict match; if it returns nothing, fall back to lenient
-      newPick = await replaceVenue(remaining, state.filters, state.datetime);
+      newPick = await replaceVenue(pool, state.filters, state.datetime);
       if (!newPick) {
-        newPick = await replaceVenueLenient(remaining, state.filters, state.datetime);
+        newPick = await replaceVenueLenient(pool, state.filters, state.datetime);
       }
-      if (newPick) state.curatedVenues.push(newPick);
+      if (newPick) {
+        newPick.outOfRange = usingOutOfRange || state.outOfRangeIds.has(newPick.id);
+        state.curatedVenues.push(newPick);
+      }
     } catch (err) {
       console.warn('Replace venue failed:', err.message);
       // Last resort: lenient
       try {
-        const fallback = await replaceVenueLenient(remaining, state.filters, state.datetime);
-        if (fallback) { newPick = fallback; state.curatedVenues.push(fallback); }
+        const fallback = await replaceVenueLenient(pool, state.filters, state.datetime);
+        if (fallback) {
+          fallback.outOfRange = usingOutOfRange || state.outOfRangeIds.has(fallback.id);
+          newPick = fallback;
+          state.curatedVenues.push(fallback);
+        }
       } catch (e) {
         console.warn('Lenient replace also failed:', e.message);
       }
@@ -224,13 +237,15 @@ function init() {
     if (!state.venues.length) return;
     showCuratingScreen();
     try {
-      const curated = await curateVenues(state.venues, state.filters, state.datetime);
-      state.curatedVenues = curated;
+      const inRange = state.venues.filter(v => !state.outOfRangeIds.has(v.id));
+      const venuesForAI = inRange.length >= 3 ? inRange : state.venues;
+      const curated = await curateVenues(venuesForAI, state.filters, state.datetime);
+      state.curatedVenues = curated.map(v => ({ ...v, outOfRange: state.outOfRangeIds.has(v.id) }));
       state.addonVenue = null;
       hideCuratingScreen();
-      renderCuratedResults(curated, state.venues, dismissAndReplace);
-      dropPins(curated.length ? curated : state.venues);
-      if (curated.length) renderExtendCTA(onExtend);
+      renderCuratedResults(state.curatedVenues, state.venues, dismissAndReplace);
+      dropPins(state.curatedVenues.length ? state.curatedVenues : state.venues);
+      if (state.curatedVenues.length) renderExtendCTA(onExtend);
     } catch (aiErr) {
       hideCuratingScreen();
       console.warn('Re-curation failed:', aiErr.message);
@@ -364,6 +379,13 @@ function init() {
     try {
       const venues = await searchVenues(lat, lng, state.radius, apiKey);
       state.venues = venues;
+      state.dismissedIds = new Set();
+
+      // Compute which venues fall outside the user's chosen radius
+      const outOfRange = venues.filter(v => v.distanceMiles != null && v.distanceMiles > state.radius);
+      state.outOfRangeIds = new Set(outOfRange.map(v => v.id));
+      const inRange = venues.filter(v => !state.outOfRangeIds.has(v.id));
+      const venuesForAI = inRange.length >= 3 ? inRange : venues;
 
       // Hide first-run hint after first successful search
       document.getElementById('onboarding-hint')?.classList.add('hidden');
@@ -371,13 +393,13 @@ function init() {
       if (venues.length) {
         showCuratingScreen();
         try {
-          const curated = await curateVenues(venues, state.filters, state.datetime);
-          state.curatedVenues = curated;
+          const curated = await curateVenues(venuesForAI, state.filters, state.datetime);
+          state.curatedVenues = curated.map(v => ({ ...v, outOfRange: state.outOfRangeIds.has(v.id) }));
           state.addonVenue = null;
           hideCuratingScreen();
-          renderCuratedResults(curated, venues, dismissAndReplace);
-          dropPins(curated.length ? curated : venues);
-          if (curated.length) renderExtendCTA(onExtend);
+          renderCuratedResults(state.curatedVenues, venues, dismissAndReplace);
+          dropPins(state.curatedVenues.length ? state.curatedVenues : venues);
+          if (state.curatedVenues.length) renderExtendCTA(onExtend);
         } catch (aiErr) {
           hideCuratingScreen();
           console.warn('AI curation failed, showing raw results:', aiErr.message);

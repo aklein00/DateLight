@@ -14,4 +14,6 @@ export const state = {
   venues: [],
   curatedVenues: [],
   addonVenue: null,
+  dismissedIds: new Set(),
+  outOfRangeIds: new Set(),
 };

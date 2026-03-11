@@ -658,6 +658,14 @@ main > .card:not(#filters-section):not(#search-panel),
   letter-spacing: 0.03em;
 }
 
+/* Out-of-range pick badge (venue is outside the user's chosen radius) */
+.ai-badge--outofrange {
+  color: rgba(160, 100, 30, 0.85);
+  background: rgba(160, 100, 30, 0.08);
+  font-style: italic;
+  letter-spacing: 0.03em;
+}
+
 /* Pool-empty notice card */
 .pool-empty-notice {
   background: white;

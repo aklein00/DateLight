@@ -1,5 +1,15 @@
 const MILES_TO_METERS = 1609.34;
 
+function haversineMiles(lat1, lng1, lat2, lng2) {
+  const R = 3958.8;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180)
+    * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 const PRICE_LEVELS = {
   PRICE_LEVEL_FREE:           '',
   PRICE_LEVEL_INEXPENSIVE:    '$',
@@ -95,6 +105,9 @@ export async function searchVenues(lat, lng, radiusMiles, apiKey) {
     name: p.displayName?.text || 'Unknown',
     lat: p.location?.latitude ?? null,
     lng: p.location?.longitude ?? null,
+    distanceMiles: (p.location?.latitude != null && p.location?.longitude != null)
+      ? haversineMiles(lat, lng, p.location.latitude, p.location.longitude)
+      : null,
     rating: p.rating ?? null,
     ratingCount: p.userRatingCount ?? null,
     price: PRICE_LEVELS[p.priceLevel] ?? null,
@@ -165,6 +178,9 @@ export async function searchAddons(lat, lng, radiusMiles, apiKey) {
     name: p.displayName?.text || 'Unknown',
     lat: p.location?.latitude ?? null,
     lng: p.location?.longitude ?? null,
+    distanceMiles: (p.location?.latitude != null && p.location?.longitude != null)
+      ? haversineMiles(lat, lng, p.location.latitude, p.location.longitude)
+      : null,
     rating: p.rating ?? null,
     ratingCount: p.userRatingCount ?? null,
     price: PRICE_LEVELS[p.priceLevel] ?? null,
