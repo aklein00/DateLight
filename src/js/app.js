@@ -3,10 +3,32 @@ import { loadGoogleMaps, initPlacesAutocomplete } from './places.js';
 import { initMap, updateRadius, dropPins } from './map.js';
 import { searchVenues, searchAddons, sampleDensity, recommendRadius } from './search.js';
 import { renderResults, renderCuratedResults, showLoading, showCuratingScreen, hideCuratingScreen, renderExtendCTA, renderAddonCard } from './ui.js';
-import { curateVenues, replaceVenue, replaceVenueLenient, suggestAddon } from './ai.js';
+import { curateDatePlans, suggestAddon } from './ai.js';
 
 const DAY_LABELS = { tonight: 'Tonight', friday: 'Fri', saturday: 'Sat', sunday: 'Sun', monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu' };
 const TIME_LABELS = { afternoon: 'Afternoon', evening: 'Evening', 'late-night': 'Late night' };
+
+function flattenPlanStops(plans) {
+  return plans.flatMap(plan => plan.stops || []).filter(stop => !stop.isVirtual);
+}
+
+function rememberShownPlans(plans) {
+  flattenPlanStops(plans).forEach(stop => state.shownPickIds.add(stop.id));
+}
+
+function markPlanRanges(plans) {
+  return plans.map(plan => {
+    const stops = (plan.stops || []).map(stop => ({
+      ...stop,
+      outOfRange: state.outOfRangeIds.has(stop.id),
+    }));
+    return {
+      ...plan,
+      stops,
+      outOfRange: stops.some(stop => stop.outOfRange),
+    };
+  });
+}
 
 const USE_MY_LOCATION_HTML = `
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4">
@@ -183,52 +205,46 @@ function init() {
     }
   }
 
-  // Dismiss one curated pick and fetch a single AI replacement from leftover venues
-  async function dismissAndReplace(dismissedVenue) {
-    state.curatedVenues = state.curatedVenues.filter(v => v.id !== dismissedVenue.id);
-    state.dismissedIds.add(dismissedVenue.id);
-    const usedIds = new Set(state.curatedVenues.map(v => v.id));
+  // Dismiss one mini-plan and ask AI for a fresh replacement plan.
+  async function dismissAndReplace(dismissedPlan) {
+    state.curatedPlans = state.curatedPlans.filter(plan => plan.id !== dismissedPlan.id);
+    (dismissedPlan.stops || []).forEach(stop => {
+      if (!stop.isVirtual) {
+        state.dismissedIds.add(stop.id);
+        state.shownPickIds.add(stop.id);
+      }
+    });
+
+    const usedIds = new Set(flattenPlanStops(state.curatedPlans).map(stop => stop.id));
     const remaining = state.venues.filter(v => !usedIds.has(v.id) && !state.dismissedIds.has(v.id));
 
     if (!remaining.length) {
       // Pool is truly empty — render a notice card
-      renderCuratedResults(state.curatedVenues, state.venues, dismissAndReplace, true /* poolEmpty */);
-      dropPins(state.curatedVenues.length ? state.curatedVenues : state.venues);
+      renderCuratedResults(state.curatedPlans, state.venues, dismissAndReplace, true /* poolEmpty */);
+      const stops = flattenPlanStops(state.curatedPlans);
+      dropPins(stops.length ? stops : state.venues);
       return;
     }
 
     // Prefer in-range replacements; fall back to full remaining pool if exhausted
     const inRangeRemaining = remaining.filter(v => !state.outOfRangeIds.has(v.id));
     const pool = inRangeRemaining.length ? inRangeRemaining : remaining;
-    const usingOutOfRange = !inRangeRemaining.length;
 
-    let newPick = null;
+    let newPlan = null;
     try {
-      // First try a strict match; if it returns nothing, fall back to lenient
-      newPick = await replaceVenue(pool, state.filters, state.datetime);
-      if (!newPick) {
-        newPick = await replaceVenueLenient(pool, state.filters, state.datetime);
-      }
-      if (newPick) {
-        newPick.outOfRange = usingOutOfRange || state.outOfRangeIds.has(newPick.id);
-        state.curatedVenues.push(newPick);
-      }
+      const plans = await curateDatePlans(pool, state.filters, state.datetime, {
+        count: 1,
+        avoidIds: state.shownPickIds,
+      });
+      newPlan = markPlanRanges(plans)[0] || null;
+      if (newPlan) state.curatedPlans.push(newPlan);
     } catch (err) {
-      console.warn('Replace venue failed:', err.message);
-      // Last resort: lenient
-      try {
-        const fallback = await replaceVenueLenient(pool, state.filters, state.datetime);
-        if (fallback) {
-          fallback.outOfRange = usingOutOfRange || state.outOfRangeIds.has(fallback.id);
-          newPick = fallback;
-          state.curatedVenues.push(fallback);
-        }
-      } catch (e) {
-        console.warn('Lenient replace also failed:', e.message);
-      }
+      console.warn('Replace plan failed:', err.message);
     }
 
-    renderCuratedResults(state.curatedVenues, state.venues, dismissAndReplace, false, newPick?.id ?? null);
+    if (newPlan) rememberShownPlans([newPlan]);
+    state.curatedVenues = flattenPlanStops(state.curatedPlans);
+    renderCuratedResults(state.curatedPlans, state.venues, dismissAndReplace, false, newPlan?.id ?? null);
     dropPins(state.curatedVenues.length ? state.curatedVenues : state.venues);
   }
 
@@ -239,13 +255,17 @@ function init() {
     try {
       const inRange = state.venues.filter(v => !state.outOfRangeIds.has(v.id));
       const venuesForAI = inRange.length >= 3 ? inRange : state.venues;
-      const curated = await curateVenues(venuesForAI, state.filters, state.datetime);
-      state.curatedVenues = curated.map(v => ({ ...v, outOfRange: state.outOfRangeIds.has(v.id) }));
+      const plans = await curateDatePlans(venuesForAI, state.filters, state.datetime, {
+        avoidIds: state.shownPickIds,
+      });
+      state.curatedPlans = markPlanRanges(plans);
+      rememberShownPlans(state.curatedPlans);
+      state.curatedVenues = flattenPlanStops(state.curatedPlans);
       state.addonVenue = null;
       hideCuratingScreen();
-      renderCuratedResults(state.curatedVenues, state.venues, dismissAndReplace);
+      renderCuratedResults(state.curatedPlans, state.venues, dismissAndReplace);
       dropPins(state.curatedVenues.length ? state.curatedVenues : state.venues);
-      if (state.curatedVenues.length) renderExtendCTA(onExtend);
+      if (state.curatedPlans.length) renderExtendCTA(onExtend);
     } catch (aiErr) {
       hideCuratingScreen();
       console.warn('Re-curation failed:', aiErr.message);
@@ -253,9 +273,9 @@ function init() {
     }
   }
 
-  // "Extend the Date" — fetch a new nearby search around the last pick and ask AI for one add-on
+  // "Extend the Date" — fetch a new nearby search around the last stop and ask AI for one add-on
   async function onExtend() {
-    const picks = state.curatedVenues;
+    const picks = flattenPlanStops(state.curatedPlans);
     if (!picks.length) return;
 
     // Use the last pick's coordinates as the epicenter; fall back to search origin
@@ -311,7 +331,7 @@ function init() {
       // Only mark pending if there are results to re-curate
       if (state.venues.length) {
         filtersUpdateBtn.classList.add('filters-update-btn--pending');
-        filtersUpdateBtn.textContent = 'Re-curate with new mood ✦';
+        filtersUpdateBtn.textContent = 'Re-plan with new mood ✦';
       }
     });
   });
@@ -319,7 +339,7 @@ function init() {
   // Update button — triggers re-curation on demand
   filtersUpdateBtn.addEventListener('click', async () => {
     filtersUpdateBtn.classList.remove('filters-update-btn--pending');
-    filtersUpdateBtn.textContent = 'Update picks';
+    filtersUpdateBtn.textContent = 'Update plans';
     filtersUpdateBtn.disabled = true;
     await reCurate();
     filtersUpdateBtn.disabled = false;
@@ -374,12 +394,14 @@ function init() {
     const heading = document.getElementById('results-heading');
     if (toggleBtn) toggleBtn.classList.add('hidden');
     if (heading) heading.textContent = 'Nearby spots';
+    state.curatedPlans = [];
     state.curatedVenues = [];
 
     try {
       const venues = await searchVenues(lat, lng, state.radius, apiKey);
       state.venues = venues;
       state.dismissedIds = new Set();
+      state.shownPickIds = new Set();
 
       // Compute which venues fall outside the user's chosen radius
       const outOfRange = venues.filter(v => v.distanceMiles != null && v.distanceMiles > state.radius);
@@ -393,13 +415,15 @@ function init() {
       if (venues.length) {
         showCuratingScreen();
         try {
-          const curated = await curateVenues(venuesForAI, state.filters, state.datetime);
-          state.curatedVenues = curated.map(v => ({ ...v, outOfRange: state.outOfRangeIds.has(v.id) }));
+          const plans = await curateDatePlans(venuesForAI, state.filters, state.datetime);
+          state.curatedPlans = markPlanRanges(plans);
+          rememberShownPlans(state.curatedPlans);
+          state.curatedVenues = flattenPlanStops(state.curatedPlans);
           state.addonVenue = null;
           hideCuratingScreen();
-          renderCuratedResults(state.curatedVenues, venues, dismissAndReplace);
+          renderCuratedResults(state.curatedPlans, venues, dismissAndReplace);
           dropPins(state.curatedVenues.length ? state.curatedVenues : venues);
-          if (state.curatedVenues.length) renderExtendCTA(onExtend);
+          if (state.curatedPlans.length) renderExtendCTA(onExtend);
         } catch (aiErr) {
           hideCuratingScreen();
           console.warn('AI curation failed, showing raw results:', aiErr.message);
@@ -408,7 +432,7 @@ function init() {
         }
         // Reveal Update button now that results exist
         filtersUpdateBtn.classList.remove('hidden');
-        filtersUpdateBtn.textContent = 'Update picks';
+        filtersUpdateBtn.textContent = 'Update plans';
         filtersUpdateBtn.classList.remove('filters-update-btn--pending');
         document.querySelector('main').classList.add('search-has-results');
       } else {
@@ -430,7 +454,7 @@ function init() {
       document.getElementById('results-area').classList.add('is-visible');
     } finally {
       searchBtn.disabled = false;
-      searchBtn.textContent = 'Find date spots';
+      searchBtn.textContent = 'Find date plans';
     }
   }
 

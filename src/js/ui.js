@@ -181,21 +181,21 @@ export function renderResults(venues) {
 let _onDismiss = null;
 
 /**
- * Render AI-curated venue cards. Adds a toggle to show all raw results.
- * @param {Array}    curatedVenues  Enriched with `tagline`, `reason`, `vibes` from ai.js
- * @param {Array}    allVenues      Full raw results for toggle
- * @param {Function} [onDismiss]    Called with a venue object when the user hits ✕
- * @param {boolean}  [poolEmpty]    When true, appends an "out of options" notice card
- * @param {string}   [newVenueId]   ID of the just-added replacement card (gets slide-in animation)
+ * Render AI-curated date plans. Adds a toggle to show all raw results.
+ * @param {Array}    curatedPlans  Enriched plan objects from ai.js
+ * @param {Array}    allVenues     Full raw results for toggle
+ * @param {Function} [onDismiss]   Called with a plan object when the user hits ✕
+ * @param {boolean}  [poolEmpty]   When true, appends an "out of options" notice card
+ * @param {string}   [newPlanId]   ID of the just-added replacement plan
  */
-export function renderCuratedResults(curatedVenues, allVenues, onDismiss, poolEmpty = false, newVenueId = null) {
+export function renderCuratedResults(curatedPlans, allVenues, onDismiss, poolEmpty = false, newPlanId = null) {
   if (onDismiss) _onDismiss = onDismiss;
   const list = document.getElementById('results-list');
   const resultsArea = document.getElementById('results-area');
   const heading = document.getElementById('results-heading');
   const toggleBtn = document.getElementById('view-toggle-btn');
 
-  if (heading) heading.textContent = 'DateLight Bright Ideas';
+  if (heading) heading.textContent = 'DateLight Mini Plans';
 
   if (toggleBtn) {
     toggleBtn.textContent = `See all ${allVenues.length} nearby`;
@@ -208,7 +208,7 @@ export function renderCuratedResults(curatedVenues, allVenues, onDismiss, poolEm
         toggleBtn.textContent = '← Back to picks';
         toggleBtn.dataset.mode = 'all';
       } else {
-        renderCuratedResults(curatedVenues, allVenues);
+        renderCuratedResults(curatedPlans, allVenues);
       }
     };
   }
@@ -224,12 +224,18 @@ export function renderCuratedResults(curatedVenues, allVenues, onDismiss, poolEm
     if (headingRow) headingRow.appendChild(copyBtn);
   }
   copyBtn.onclick = () => {
-    const text = curatedVenues.map((v, i) => {
-      const parts = [`${i + 1}. "${v.tagline || v.name}"\n   @${v.name}`];
-      if (v.mapsUrl) parts.push(`   ${v.mapsUrl}`);
+    const text = curatedPlans.map((plan, i) => {
+      const parts = [`${i + 1}. ${plan.title}`];
+      if (plan.summary) parts.push(`   ${plan.summary}`);
+      (plan.stops || []).forEach((stop, stopIndex) => {
+        parts.push(`   ${stopIndex + 1}. ${stop.label || 'Stop'}: ${stop.name}`);
+        if (stop.note) parts.push(`      ${stop.note}`);
+        if (stop.mapsUrl) parts.push(`      ${stop.mapsUrl}`);
+      });
+      if (plan.transition) parts.push(`   ${plan.transition}`);
       return parts.join('\n');
     }).join('\n\n');
-    navigator.clipboard.writeText(`DateLight picks:\n\n${text}`).then(() => {
+    navigator.clipboard.writeText(`DateLight plans:\n\n${text}`).then(() => {
       copyBtn.textContent = '✓ Copied!';
       copyBtn.classList.add('copy-plan-btn--copied');
       setTimeout(() => {
@@ -242,20 +248,23 @@ export function renderCuratedResults(curatedVenues, allVenues, onDismiss, poolEm
   const favorites = getFavorites();
 
   list.innerHTML = '';
-  curatedVenues.forEach((v, i) => {
+  curatedPlans.forEach((plan, i) => {
     const card = document.createElement('div');
-    card.className = 'venue-card venue-card--curated';
+    card.className = 'venue-card venue-card--curated plan-card';
     // New replacement card slides in from right; all others fan in up
-    if (v.id === newVenueId) {
+    if (plan.id === newPlanId) {
       card.style.animation = 'cardSlideInRight 0.4s cubic-bezier(0.22,1,0.36,1) both';
     } else {
       card.style.animationDelay = `${i * 120 + 60}ms`;
     }
-    card.dataset.venueId = v.id;
+    card.dataset.planId = plan.id;
 
     // Pin hover linkage
-    card.addEventListener('mouseenter', () => highlightPin(v.id));
-    card.addEventListener('mouseleave', () => unhighlightPin(v.id));
+    const firstPinnedStop = (plan.stops || []).find(stop => !stop.isVirtual);
+    if (firstPinnedStop) {
+      card.addEventListener('mouseenter', () => highlightPin(firstPinnedStop.id));
+      card.addEventListener('mouseleave', () => unhighlightPin(firstPinnedStop.id));
+    }
 
     // Dismiss button
     const dismissBtn = document.createElement('button');
@@ -269,110 +278,154 @@ export function renderCuratedResults(curatedVenues, allVenues, onDismiss, poolEm
       setTimeout(() => {
         card.classList.remove('venue-card--dismissing');
         card.classList.add('venue-card--replacing');
-        card.innerHTML = `<p class="venue-replacing-text">Finding a replacement…</p>`;
-        _onDismiss(v);
+        card.innerHTML = `<p class="venue-replacing-text">Finding a new plan…</p>`;
+        _onDismiss(plan);
       }, 280);
     });
     card.appendChild(dismissBtn);
 
-    // Tagline
-    if (v.tagline) {
-      const taglineEl = document.createElement('p');
-      taglineEl.className = 'venue-tagline';
-      taglineEl.textContent = `"${v.tagline}"`;
-      card.appendChild(taglineEl);
+    if (plan.title) {
+      const titleEl = document.createElement('p');
+      titleEl.className = 'venue-tagline plan-title';
+      titleEl.textContent = plan.title;
+      card.appendChild(titleEl);
     }
 
-    // @VenueName row
-    const nameRow = document.createElement('div');
-    nameRow.className = 'flex items-center justify-between gap-2';
-
-    const nameEl = document.createElement('div');
-    nameEl.className = 'venue-handle';
-    nameEl.textContent = `@${v.name}`;
-
+    const badgeRow = document.createElement('div');
+    badgeRow.className = 'flex items-center justify-between gap-2';
+    const planLabel = document.createElement('div');
+    planLabel.className = 'plan-label';
+    planLabel.textContent = `Plan ${i + 1}`;
     const aiBadge = document.createElement('span');
-    aiBadge.className = v.outOfRange
+    aiBadge.className = plan.outOfRange
       ? 'ai-badge ai-badge--outofrange'
-      : v.stretch ? 'ai-badge ai-badge--stretch' : 'ai-badge';
-    aiBadge.textContent = v.outOfRange
-      ? '↗ just outside your range'
-      : v.stretch ? '~ nearby option' : '✦ pick';
+      : plan.stretch ? 'ai-badge ai-badge--stretch' : 'ai-badge';
+    aiBadge.textContent = plan.outOfRange
+      ? '↗ includes a stretch'
+      : plan.stretch ? '~ flexible plan' : '✦ mini plan';
+    badgeRow.appendChild(planLabel);
+    badgeRow.appendChild(aiBadge);
+    card.appendChild(badgeRow);
 
-    nameRow.appendChild(nameEl);
-    nameRow.appendChild(aiBadge);
-    card.appendChild(nameRow);
-
-    // Reason sentence
-    if (v.reason) {
-      const reasonEl = document.createElement('p');
-      reasonEl.className = 'venue-reason';
-      reasonEl.textContent = v.reason;
-      card.appendChild(reasonEl);
+    if (plan.summary) {
+      const summaryEl = document.createElement('p');
+      summaryEl.className = 'venue-reason plan-summary';
+      summaryEl.textContent = plan.summary;
+      card.appendChild(summaryEl);
     }
 
-    // Vibe pills + price + rating row
-    const metaRow = document.createElement('div');
-    metaRow.className = 'venue-meta flex-wrap gap-y-1 mt-1';
+    const stopsWrap = document.createElement('div');
+    stopsWrap.className = 'plan-stops';
 
-    if (v.rating != null) {
-      const ratingEl = document.createElement('span');
-      ratingEl.className = 'venue-stars';
-      ratingEl.textContent = starRating(v.rating);
-      const ratingNum = document.createElement('span');
-      ratingNum.textContent = v.rating.toFixed(1);
-      metaRow.appendChild(ratingEl);
-      metaRow.appendChild(ratingNum);
-    }
+    (plan.stops || []).forEach((stop, stopIndex) => {
+      const stopEl = document.createElement('div');
+      stopEl.className = 'plan-stop';
 
-    if (v.price) {
-      const priceEl = document.createElement('span');
-      priceEl.className = 'venue-price';
-      priceEl.textContent = v.price;
-      metaRow.appendChild(priceEl);
-    }
+      const stopHeader = document.createElement('div');
+      stopHeader.className = 'plan-stop-header';
 
-    (v.vibes || []).forEach(vibe => {
-      const pill = document.createElement('span');
-      pill.className = 'vibe-pill';
-      pill.textContent = vibe;
-      metaRow.appendChild(pill);
+      const stopLabel = document.createElement('span');
+      stopLabel.className = 'plan-stop-label';
+      stopLabel.textContent = stop.label || (stopIndex === 0 ? 'Start' : 'Then');
+
+      const stopName = document.createElement('span');
+      stopName.className = 'venue-handle plan-stop-name';
+      stopName.textContent = stop.isVirtual ? stop.name : `@${stop.name}`;
+
+      stopHeader.appendChild(stopLabel);
+      stopHeader.appendChild(stopName);
+      stopEl.appendChild(stopHeader);
+
+      if (stop.note) {
+        const noteEl = document.createElement('p');
+        noteEl.className = 'venue-reason plan-stop-note';
+        noteEl.textContent = stop.note;
+        stopEl.appendChild(noteEl);
+      }
+
+      const stopMeta = document.createElement('div');
+      stopMeta.className = 'venue-meta flex-wrap gap-y-1 mt-1';
+
+      if (stop.rating != null) {
+        const ratingEl = document.createElement('span');
+        ratingEl.className = 'venue-stars';
+        ratingEl.textContent = starRating(stop.rating);
+        const ratingNum = document.createElement('span');
+        ratingNum.textContent = stop.rating.toFixed(1);
+        stopMeta.appendChild(ratingEl);
+        stopMeta.appendChild(ratingNum);
+      }
+
+      if (stop.price) {
+        const priceEl = document.createElement('span');
+        priceEl.className = 'venue-price';
+        priceEl.textContent = stop.price;
+        stopMeta.appendChild(priceEl);
+      }
+
+      const typeTag = document.createElement('span');
+      typeTag.className = 'venue-type-tag';
+      typeTag.textContent = stop.type || stop.role || 'Activity';
+      stopMeta.appendChild(typeTag);
+
+      if (stopMeta.childNodes.length) stopEl.appendChild(stopMeta);
+
+      const stopFooter = document.createElement('div');
+      stopFooter.className = 'venue-footer plan-stop-footer';
+
+      if (stop.mapsUrl) {
+        const linkEl = document.createElement('a');
+        linkEl.href = stop.mapsUrl;
+        linkEl.target = '_blank';
+        linkEl.rel = 'noopener noreferrer';
+        linkEl.className = 'venue-maps-link';
+        linkEl.textContent = '↗ Open in Maps';
+        stopFooter.appendChild(linkEl);
+      } else {
+        stopFooter.appendChild(document.createElement('span'));
+      }
+
+      if (!stop.isVirtual) {
+        const heartBtn = document.createElement('button');
+        const isSaved = favorites.includes(stop.id);
+        heartBtn.className = `venue-heart-btn${isSaved ? ' venue-heart-btn--saved' : ''}`;
+        heartBtn.title = isSaved ? 'Remove from favorites' : 'Save this spot';
+        heartBtn.textContent = isSaved ? '♥' : '♡';
+        heartBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const saved = toggleFavorite(stop.id);
+          heartBtn.textContent = saved ? '♥' : '♡';
+          heartBtn.classList.toggle('venue-heart-btn--saved', saved);
+          heartBtn.title = saved ? 'Remove from favorites' : 'Save this spot';
+        });
+        stopFooter.appendChild(heartBtn);
+      }
+
+      stopEl.appendChild(stopFooter);
+      stopsWrap.appendChild(stopEl);
     });
 
-    card.appendChild(metaRow);
+    card.appendChild(stopsWrap);
 
-    // Footer: Maps link + heart
-    const footer = document.createElement('div');
-    footer.className = 'venue-footer';
-
-    if (v.mapsUrl) {
-      const linkEl = document.createElement('a');
-      linkEl.href = v.mapsUrl;
-      linkEl.target = '_blank';
-      linkEl.rel = 'noopener noreferrer';
-      linkEl.className = 'venue-maps-link';
-      linkEl.textContent = '↗ Open in Maps';
-      footer.appendChild(linkEl);
-    } else {
-      footer.appendChild(document.createElement('span')); // spacer
+    if (plan.transition) {
+      const transitionEl = document.createElement('p');
+      transitionEl.className = 'plan-transition';
+      transitionEl.textContent = plan.transition;
+      card.appendChild(transitionEl);
     }
 
-    const heartBtn = document.createElement('button');
-    const isSaved = favorites.includes(v.id);
-    heartBtn.className = `venue-heart-btn${isSaved ? ' venue-heart-btn--saved' : ''}`;
-    heartBtn.title = isSaved ? 'Remove from favorites' : 'Save this spot';
-    heartBtn.textContent = isSaved ? '♥' : '♡';
-    heartBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const saved = toggleFavorite(v.id);
-      heartBtn.textContent = saved ? '♥' : '♡';
-      heartBtn.classList.toggle('venue-heart-btn--saved', saved);
-      heartBtn.title = saved ? 'Remove from favorites' : 'Save this spot';
-    });
-    footer.appendChild(heartBtn);
-
-    card.appendChild(footer);
+    if (plan.vibes?.length) {
+      const metaRow = document.createElement('div');
+      metaRow.className = 'venue-meta flex-wrap gap-y-1 mt-1';
+      plan.vibes.forEach(vibe => {
+        const pill = document.createElement('span');
+        pill.className = 'vibe-pill';
+        pill.textContent = vibe;
+        metaRow.appendChild(pill);
+      });
+      card.appendChild(metaRow);
+    }
 
     list.appendChild(card);
   });
@@ -405,15 +458,15 @@ export function renderExtendCTA(onExtend) {
 
   const btn = document.createElement('button');
   btn.className = 'extend-cta';
-  btn.innerHTML = `<span class="extend-cta-label">Extend the evening</span><span class="extend-cta-arrow">→</span>`;
+    btn.innerHTML = `<span class="extend-cta-label">Add a bonus stop</span><span class="extend-cta-arrow">→</span>`;
   btn.addEventListener('click', async () => {
     btn.disabled = true;
-    btn.innerHTML = `<span class="extend-cta-label">Finding the perfect next stop…</span>`;
+      btn.innerHTML = `<span class="extend-cta-label">Finding one more stop…</span>`;
     btn.classList.add('extend-cta--loading');
     try {
       await onExtend();
     } catch {
-      btn.innerHTML = `<span class="extend-cta-label">Extend the evening</span><span class="extend-cta-arrow">→</span>`;
+      btn.innerHTML = `<span class="extend-cta-label">Add a bonus stop</span><span class="extend-cta-arrow">→</span>`;
       btn.disabled = false;
       btn.classList.remove('extend-cta--loading');
     }

@@ -13,7 +13,9 @@ export const state = {
   },
   venues: [],
   curatedVenues: [],
+  curatedPlans: [],
   addonVenue: null,
   dismissedIds: new Set(),
+  shownPickIds: new Set(),
   outOfRangeIds: new Set(),
 };

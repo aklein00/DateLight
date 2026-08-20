@@ -23,6 +23,9 @@ const TYPE_LABELS = {
   bar:                 'Bar',
   cafe:                'Café',
   night_club:          'Nightclub',
+  dessert_restaurant:  'Dessert',
+  ice_cream_shop:      'Ice Cream',
+  bakery:              'Bakery',
   tourist_attraction:  'Attraction',
   amusement_park:      'Amusement',
   bowling_alley:       'Bowling',
@@ -50,6 +53,92 @@ export function getPrimaryType(types = []) {
   return 'Venue';
 }
 
+const FOOD_DRINK_TYPES = [
+  'restaurant', 'bar', 'cafe', 'night_club',
+  'dessert_restaurant', 'ice_cream_shop', 'bakery',
+];
+
+const ACTIVITY_TYPES = [
+  'park', 'art_gallery', 'museum',
+  'movie_theater', 'bowling_alley', 'amusement_park',
+  'tourist_attraction',
+];
+
+const DATE_CANDIDATE_TYPES = [...FOOD_DRINK_TYPES, ...ACTIVITY_TYPES];
+
+const PLACE_FIELD_MASK = [
+  'places.id',
+  'places.displayName',
+  'places.location',
+  'places.rating',
+  'places.userRatingCount',
+  'places.priceLevel',
+  'places.types',
+  'places.formattedAddress',
+  'places.googleMapsUri',
+  'places.businessStatus',
+].join(',');
+
+function getVenueCategory(types = []) {
+  if (types.some(t => ACTIVITY_TYPES.includes(t))) return 'activity';
+  if (types.some(t => FOOD_DRINK_TYPES.includes(t))) return 'food_drink';
+  return 'venue';
+}
+
+function normalizePlace(p, originLat, originLng) {
+  return {
+    id: p.id,
+    name: p.displayName?.text || 'Unknown',
+    lat: p.location?.latitude ?? null,
+    lng: p.location?.longitude ?? null,
+    distanceMiles: (p.location?.latitude != null && p.location?.longitude != null)
+      ? haversineMiles(originLat, originLng, p.location.latitude, p.location.longitude)
+      : null,
+    rating: p.rating ?? null,
+    ratingCount: p.userRatingCount ?? null,
+    price: PRICE_LEVELS[p.priceLevel] ?? null,
+    type: getPrimaryType(p.types),
+    category: getVenueCategory(p.types),
+    rawTypes: p.types || [],
+    address: p.formattedAddress ?? null,
+    mapsUrl: p.googleMapsUri ?? null,
+  };
+}
+
+async function fetchNearbyPlaces(lat, lng, radiusMeters, apiKey, includedTypes, maxResultCount) {
+  const response = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': apiKey,
+      'X-Goog-FieldMask': PLACE_FIELD_MASK,
+    },
+    body: JSON.stringify({
+      includedTypes,
+      locationRestriction: {
+        circle: {
+          center: { latitude: lat, longitude: lng },
+          radius: radiusMeters,
+        },
+      },
+      maxResultCount,
+      rankPreference: 'POPULARITY',
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `Places API error ${response.status}`);
+  }
+
+  const data = await response.json();
+  return (data.places || []).filter(p => p.businessStatus !== 'CLOSED_PERMANENTLY');
+}
+
+function dedupePlaces(places) {
+  return Array.from(new Map(places.map(place => [place.id, place])).values());
+}
+
 /**
  * Search for date-worthy venues near a location using the Places API (New).
  * @param {number} lat
@@ -61,60 +150,14 @@ export function getPrimaryType(types = []) {
 export async function searchVenues(lat, lng, radiusMiles, apiKey) {
   const radiusMeters = Math.min(radiusMiles * MILES_TO_METERS, 50000); // API max 50km
 
-  const response = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Goog-Api-Key': apiKey,
-      'X-Goog-FieldMask': [
-        'places.id',
-        'places.displayName',
-        'places.location',
-        'places.rating',
-        'places.userRatingCount',
-        'places.priceLevel',
-        'places.types',
-        'places.formattedAddress',
-        'places.googleMapsUri',
-        'places.businessStatus',
-      ].join(','),
-    },
-    body: JSON.stringify({
-      includedTypes: ['restaurant', 'bar', 'cafe', 'night_club'],
-      locationRestriction: {
-        circle: {
-          center: { latitude: lat, longitude: lng },
-          radius: radiusMeters,
-        },
-      },
-      maxResultCount: 20,
-      rankPreference: 'POPULARITY',
-    }),
-  });
+  const [foodDrink, activities] = await Promise.all([
+    fetchNearbyPlaces(lat, lng, radiusMeters, apiKey, FOOD_DRINK_TYPES, 14),
+    fetchNearbyPlaces(lat, lng, radiusMeters, apiKey, ACTIVITY_TYPES, 10),
+  ]);
 
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err?.error?.message || `Places API error ${response.status}`);
-  }
-
-  const data = await response.json();
-  const places = (data.places || []).filter(p => p.businessStatus !== 'CLOSED_PERMANENTLY');
-
-  return places.map(p => ({
-    id: p.id,
-    name: p.displayName?.text || 'Unknown',
-    lat: p.location?.latitude ?? null,
-    lng: p.location?.longitude ?? null,
-    distanceMiles: (p.location?.latitude != null && p.location?.longitude != null)
-      ? haversineMiles(lat, lng, p.location.latitude, p.location.longitude)
-      : null,
-    rating: p.rating ?? null,
-    ratingCount: p.userRatingCount ?? null,
-    price: PRICE_LEVELS[p.priceLevel] ?? null,
-    type: getPrimaryType(p.types),
-    address: p.formattedAddress ?? null,
-    mapsUrl: p.googleMapsUri ?? null,
-  })).sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
+  return dedupePlaces([...foodDrink, ...activities])
+    .map(p => normalizePlace(p, lat, lng))
+    .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
 }
 
 /**
@@ -129,65 +172,18 @@ export async function searchVenues(lat, lng, radiusMiles, apiKey) {
 export async function searchAddons(lat, lng, radiusMiles, apiKey) {
   const radiusMeters = Math.min(radiusMiles * MILES_TO_METERS, 50000);
 
-  const response = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Goog-Api-Key': apiKey,
-      'X-Goog-FieldMask': [
-        'places.id',
-        'places.displayName',
-        'places.location',
-        'places.rating',
-        'places.userRatingCount',
-        'places.priceLevel',
-        'places.types',
-        'places.formattedAddress',
-        'places.googleMapsUri',
-        'places.businessStatus',
-      ].join(','),
-    },
-    body: JSON.stringify({
-      includedTypes: [
-        'bar', 'night_club', 'cafe',
-        'dessert_restaurant', 'ice_cream_shop', 'bakery',
-        'park', 'art_gallery', 'museum',
-        'movie_theater', 'bowling_alley', 'amusement_park',
-      ],
-      locationRestriction: {
-        circle: {
-          center: { latitude: lat, longitude: lng },
-          radius: radiusMeters,
-        },
-      },
-      maxResultCount: 15,
-      rankPreference: 'POPULARITY',
-    }),
-  });
+  const places = await fetchNearbyPlaces(
+    lat,
+    lng,
+    radiusMeters,
+    apiKey,
+    ['bar', 'night_club', 'cafe', 'dessert_restaurant', 'ice_cream_shop', 'bakery', ...ACTIVITY_TYPES],
+    15,
+  );
 
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err?.error?.message || `Places API error ${response.status}`);
-  }
-
-  const data = await response.json();
-  const places = (data.places || []).filter(p => p.businessStatus !== 'CLOSED_PERMANENTLY');
-
-  return places.map(p => ({
-    id: p.id,
-    name: p.displayName?.text || 'Unknown',
-    lat: p.location?.latitude ?? null,
-    lng: p.location?.longitude ?? null,
-    distanceMiles: (p.location?.latitude != null && p.location?.longitude != null)
-      ? haversineMiles(lat, lng, p.location.latitude, p.location.longitude)
-      : null,
-    rating: p.rating ?? null,
-    ratingCount: p.userRatingCount ?? null,
-    price: PRICE_LEVELS[p.priceLevel] ?? null,
-    type: getPrimaryType(p.types),
-    address: p.formattedAddress ?? null,
-    mapsUrl: p.googleMapsUri ?? null,
-  })).sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
+  return places
+    .map(p => normalizePlace(p, lat, lng))
+    .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
 }
 
 /**
@@ -205,7 +201,7 @@ export async function sampleDensity(lat, lng, apiKey) {
         'X-Goog-FieldMask': 'places.id',
       },
       body: JSON.stringify({
-        includedTypes: ['restaurant', 'bar', 'cafe', 'night_club'],
+        includedTypes: DATE_CANDIDATE_TYPES,
         locationRestriction: {
           circle: {
             center: { latitude: lat, longitude: lng },
